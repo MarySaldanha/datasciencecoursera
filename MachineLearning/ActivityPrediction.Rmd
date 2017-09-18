@@ -1,0 +1,173 @@
+---
+title: "PredictionAssignment"
+author: "Mary Saldanha"
+date: "September 17, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,results='hide')
+```
+
+### Prediction Assignment :  Human Activity Recognition 
+
+This assignment is to predict the manner of the exercise performed by 6 participants, using the Weight Lifting Exercises (WLE) Dataset. 
+
+The data for this assignment is from the source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har.
+
+There are two dataset files - Training and Testing and the outcome is in classe. The classe values are 
+A - Exercise is performed exactly according to specification
+B - Throwing the elbows to tehe front
+C - Lifting the dumbbell halfway 
+D - Lowering dumbbell halfway
+E - Throwing the hips to the front 
+
+
+```{r readdata, echo=FALSE}
+library(caret)
+set.seed(15383)
+
+training <- read.csv("./pml-training.csv",na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv("./pml-testing.csv",na.strings=c("NA","#DIV/0!",""))
+
+nrow(training)
+nrow(testing)
+```
+
+```{r traindata details,echo=TRUE,results='unhide'}
+dim(training)
+```
+
+## Data cleansing
+
+The 160 variables is a lot of dimensions to look at, hence to clean up data and remove redundant variables. 
+
+* Remove statistical variables
+* Remove date and times, user info which are not related to the final outcome
+* Roll, pitch and yaw are derived from gyros, magnet and accel, hence one or the other can be used, for the analysis below, roll, pitch and yaw has been used 
+ 
+```{r datacleansing, echo=FALSE}
+
+list <- c( grep( "var", colnames(training) , value = "T")
+            , grep( "stddev", colnames(training) , value = "T")
+            , grep( "skewness", colnames(training) , value = "T")
+            , grep( "avg", colnames(training) , value = "T")
+            , grep( "kurtosis", colnames(training) , value = "T") 
+            , grep( "min", colnames(training) , value = "T")
+            ,  grep( "max", colnames(training) , value = "T") 
+            , "X" 
+            , grep("timestamp", colnames(training) , value ="T")
+            , grep("amplitude", colnames(training) , value ="T")
+            , "user_name"
+            , "new_window" , "num_window"
+            , grep("total", colnames(training) , value ="T")
+            , grep("gyros", colnames(training) , value ="T")
+            , grep("magnet", colnames(training) , value ="T")
+            , grep("accel", colnames(training) , value ="T")
+)
+
+finalcols <- colnames(training[!(names(training) %in% list)])
+```
+
+## Cross Validation 
+
+To perform cross validation, as we have a training set, the training set will be split further into a training train_1, and testing data set test_1.
+
+We create a linermodel on the train_1 dataset and check the coefficients to see if we have all the necessary variables. 
+
+
+```{r crossvalidation, echo = FALSE}
+mytrain <- training[finalcols]
+
+datapart <- createDataPartition(y=training$classe, p=.55, list = FALSE)
+train_1 <- mytrain[datapart,]
+test_1 <- mytrain[-datapart,]
+
+train_2 <- train_1
+train_2$class <- ifelse(train_2$classe == "A", 1 , 
+ifelse(train_2$classe == "B" , 2 ,
+ifelse(train_2$classe == "C", 3 ,
+ifelse(train_2$classe == "D", 4,
+5 )
+ )
+ )
+ )
+
+mdl <- lm(class ~ . - classe, data = train_2)
+```
+
+Summary of linear model coefficients 
+```{r lm summary,results='unhide'}
+summary(mdl) 
+varImp(mdl , scale = TRUE)
+```
+
+
+Models applied are : rainforest and gbm (Gradient boosting machine) on the training dataset.
+
+The prediction is applied on the test_1 dataset. 
+
+```{r models, echo = FALSE}
+mdl_tr1 <- train(classe ~ ., data = train_1, method = "rf")
+mdl_tr2 <- train(classe ~ ., data = train_1, method = "gbm")
+
+
+pred_tr1 <-  predict(mdl_tr1, test_1)
+pred_tr2 <-  predict(mdl_tr2, test_1)
+```
+
+We then stack the predictions from the above and perform training and prediction on the test_2 dataset. We then check the Accuracy as shown in Appendix.  
+
+```{r stacking and prediction}
+
+train_df <- data.frame(pred_tr1, pred_tr2, classe=test_1$classe)
+
+trainfit <- train(classe ~ ., method="rf",data=train_df)
+trainpredict <- predict(trainfit,train_df)
+
+confusionMatrix(trainpredict,test_1$classe)
+```
+
+The trained models are then applied to the testing/validation data set. The predicted values are as follows : 
+
+```{r Finaltesting, echo=FALSE}
+testset <- testing[finalcols[!(finalcols %in% "classe")]]
+
+pred_tst1 <-  predict(mdl_tr1, testing)
+pred_tst2 <-  predict(mdl_tr2, testing)
+
+test_df <- data.frame(pred_tr1=pred_tst1, pred_tr2=pred_tst2)
+```
+
+```{r finalresult, echo = TRUE,results='unhide'}
+predfit <- predict(trainfit,test_df)
+predfit 
+
+```
+
+Estimated error using the respective models and the combined model, against test_1 dataset is as below. Refer Accuracy in Appendix for detailed information. 
+```{r estimated error,results='unhide'}
+sqrt(sum(ifelse(pred_tr1 == test_1$classe,0,1)^2))
+sqrt(sum(ifelse(pred_tr2 == test_1$classe,0,1)^2))
+sqrt(sum(ifelse(trainpredict == test_1$classe,0,1)^2))
+```
+
+##Appendix 
+#Residual plot
+```{r residual matrix, echo = TRUE,results='unhide'}
+par(mfrow=c(2,2))
+plot(mdl)
+```
+
+#List of predictors 
+```{r columns, echo = TRUE,results='unhide'}
+finalcols
+```
+
+#Accuracy 
+```{r  accuracy, echo = TRUE,results='unhide'}
+confusionMatrix(pred_tr1,test_1$classe)
+confusionMatrix(pred_tr2,test_1$classe)
+confusionMatrix(trainpredict,test_1$classe)
+```
+
